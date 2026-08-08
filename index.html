@@ -118,6 +118,10 @@
     box-shadow:0 2px 10px rgba(0,0,0,.25);z-index:900;font-size:11px;max-width:230px}
   .map-legend h4{margin:0 0 5px;font-size:10.5px;color:var(--azul);text-transform:uppercase;letter-spacing:.5px}
   #menuBtn,#fab{display:none}
+  #homeBtn{display:inline-flex;align-items:center;justify-content:center;background:rgba(255,255,255,.16);border:1px solid rgba(255,255,255,.35);
+    color:#fff;font-size:18px;width:38px;height:38px;border-radius:10px;cursor:pointer;flex:none;transition:background .15s}
+  #homeBtn:hover{background:rgba(255,255,255,.3)}
+  #homeBtn:active{transform:scale(.95)}
   @media (max-width:1250px){#side{width:290px}#detail{width:350px}.topbar h1{font-size:12px}.chip{min-width:60px}.map-legend{left:314px}}
   @media (max-width:950px){#side{width:255px}#detail{width:330px;right:8px}.chips{display:none}.map-legend{left:279px}}
   @media (max-width:767px){
@@ -151,6 +155,7 @@
 <div id="map"></div>
 <div class="topbar">
   <button id="menuBtn" aria-label="Ver puestos de votación" title="Puestos de votación">☰</button>
+  <button id="homeBtn" aria-label="Volver al mapa inicial de Acandí" title="Volver al mapa inicial de Acandí">🏠</button>
   <div>
     <h1>🗺️ Atlas Electoral y Territorial de Acandí</h1>
     <div class="sub">Chocó · 2022–2027 · Registraduría DIVIPOL + Alcaldía 2023 · EPSG:4326</div>
@@ -246,7 +251,8 @@ const OSM = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoo
 const GOG  = L.tileLayer('https://mt1.google.com/vt/lyrs=s&hl=es&x={x}&y={y}&z={z}',{maxZoom:22,attribution:'Imagery &copy; Google'});
 const GOGH = L.tileLayer('https://mt1.google.com/vt/lyrs=y&hl=es&x={x}&y={y}&z={z}',{maxZoom:22,attribution:'Imagery &copy; Google'});
 let base='satelite';
-const map = L.map('map',{zoomControl:true,minZoom:9,maxZoom:21,zoomSnap:1}).setView([8.52,-77.26],11);
+const VIEW_INI={c:[8.52,-77.26],z:11};
+const map = L.map('map',{zoomControl:true,minZoom:9,maxZoom:21,zoomSnap:1}).setView(VIEW_INI.c,VIEW_INI.z);
 GOG.addTo(map);
 map.on('zoomend',applySelection);
 L.geoJSON(LIMITE,{style:{color:'#d00000',weight:2.5,fill:false,dashArray:'7,5'}})
@@ -307,6 +313,18 @@ function isMobile(){ return window.matchMedia('(max-width:767px)').matches; }
 function openSide(){ document.getElementById('side').classList.add('open'); }
 function closeSide(){ document.getElementById('side').classList.remove('open'); }
 function toggleSide(){ document.getElementById('side').classList.toggle('open'); }
+
+function volverMapaInicial(){
+  try{ map.closePopup(); }catch(e){}
+  Object.values(markersData).forEach(m=>{ try{ m.closeTooltip(); }catch(e){} });
+  selected=null;
+  applySelection();
+  renderListUI(document.getElementById('search').value);
+  renderDetail();
+  map.setView(VIEW_INI.c,VIEW_INI.z,{animate:true,duration:.7});
+  if(isMobile()){ closeSide(); document.getElementById('detail').classList.add('hidden'); }
+  showToast('🏠 Mapa inicial de Acandí');
+}
 
 function selectPuesto(nombre){
   try{ map.closePopup(); }catch(e){}
@@ -743,6 +761,7 @@ document.getElementById('detClose').addEventListener('click',()=>{
   else { renderDetail(); }
 });
 document.getElementById('menuBtn').addEventListener('click',toggleSide);
+document.getElementById('homeBtn').addEventListener('click',volverMapaInicial);
 document.getElementById('fab').addEventListener('click',()=>{ toggleSide(); document.getElementById('detail').classList.add('hidden'); });
 document.getElementById('search').addEventListener('focus',()=>{ if(isMobile()) openSide(); });
 
