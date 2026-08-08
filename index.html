@@ -60,10 +60,14 @@
     box-shadow:0 4px 20px rgba(0,0,0,.25);display:flex;flex-direction:column;overflow:hidden;transition:transform .25s ease}
   #detail.hidden{transform:translateX(calc(100% + 24px))}
   .det-head{padding:11px 16px 9px;color:#fff;position:relative}
-  .det-head .t{font-size:15px;font-weight:700;line-height:1.2;padding-right:26px}
-  .det-head .s{font-size:11px;opacity:.88;margin-top:2px}
+  .det-head .t{font-size:15px;font-weight:700;line-height:1.2;padding-right:26px;padding-left:34px}
+  .det-head .s{font-size:11px;opacity:.88;margin-top:2px;padding-left:34px}
   .det-close{position:absolute;top:9px;right:12px;background:rgba(255,255,255,.25);border:none;color:#fff;font-size:16px;width:26px;height:26px;border-radius:50%;cursor:pointer;line-height:1}
   .det-close:hover{background:rgba(255,255,255,.4)}
+  .det-back{position:absolute;top:9px;left:12px;background:rgba(255,255,255,.25);border:none;color:#fff;font-size:18px;width:26px;height:26px;border-radius:50%;cursor:pointer;line-height:1}
+  .det-back:hover{background:rgba(255,255,255,.4)}
+  .det-mini{height:190px;border-radius:10px;border:1px solid var(--borde);margin:8px 0 4px;overflow:hidden;position:relative;background:#dde6ee}
+  .det-mini .cap{position:absolute;left:8px;bottom:8px;z-index:900;background:rgba(255,255,255,.92);border-radius:7px;padding:3px 8px;font-size:10.5px;font-weight:600;color:var(--azul);box-shadow:0 1px 5px rgba(0,0,0,.25)}
   .det-tabs{display:flex;gap:3px;padding:6px 10px;background:#f4f7fb;border-bottom:1px solid var(--borde)}
   .det-tab{flex:1;padding:5px 2px;font-size:10.5px;font-weight:600;border:none;background:transparent;color:#5a6a7c;border-radius:6px;cursor:pointer;white-space:nowrap}
   .det-tab:hover{background:#e6edf6}
@@ -172,6 +176,7 @@
   <div id="capasWrap"></div>
 </div>
 <div id="detail" class="hidden">
+  <button class="det-back" id="detBack" aria-label="Volver al mapa principal" title="Volver al mapa principal">←</button>
   <button class="det-close" id="detClose">✕</button>
   <div class="det-head" id="detHead">
     <div class="t" id="detTitulo">—</div>
@@ -276,6 +281,24 @@ const simps = loadSimp();
 function markerRadius(){ const z=map.getZoom(); return z>=18?6:(z>=15?9:13); }
 function gmapsLink(p){ return `https://www.google.com/maps/@${p.lat},${p.lon},18z`; }
 
+let miniMap=null;
+function renderMiniMap(p){
+  const host=document.getElementById('detMiniMap');
+  if(!host) return;
+  if(miniMap){ try{ miniMap.remove(); }catch(e){} miniMap=null; }
+  const mini=L.map(host,{zoomControl:false,attributionControl:false,scrollWheelZoom:false,doubleClickZoom:false})
+    .setView([p.lat,p.lon],17);
+  const gog=L.tileLayer('https://mt1.google.com/vt/lyrs=s&hl=es&x={x}&y={y}&z={z}',{maxZoom:22});
+  gog.addTo(mini);
+  L.circleMarker([p.lat,p.lon],{radius:7,color:'#fff',weight:2,fillColor:'#d00000',fillOpacity:.92})
+    .bindTooltip(`<b>${esc(p.short)}</b>`,{direction:'top',offset:[0,-10]}).addTo(mini);
+  miniMap=mini;
+  setTimeout(()=>{ try{ miniMap.invalidateSize(); }catch(e){} },120);
+}
+function destroyMiniMap(){
+  if(miniMap){ try{ miniMap.remove(); }catch(e){} miniMap=null; }
+}
+
 function buildMarkers(){
   markerLayer.clearLayers();
   PUESTOS.forEach(p=>{
@@ -317,6 +340,7 @@ function toggleSide(){ document.getElementById('side').classList.toggle('open');
 function volverMapaInicial(){
   try{ map.closePopup(); }catch(e){}
   Object.values(markersData).forEach(m=>{ try{ m.closeTooltip(); }catch(e){} });
+  destroyMiniMap();
   selected=null;
   applySelection();
   renderListUI(document.getElementById('search').value);
@@ -511,6 +535,8 @@ function renderDetail(){
   head.style.background=grad;
   document.querySelectorAll('.det-tab').forEach(b=>b.classList.toggle('act',b.dataset.t===detailTab));
   body.innerHTML=contentFor(detailTab,p,isMun);
+  if(detailTab==='gral' && p){ setTimeout(()=>renderMiniMap(p),140); }
+  else destroyMiniMap();
   if(detailTab==='graf') setTimeout(()=>buildGraficas(p,isMun),60);
   det.classList.remove('hidden');
 }
@@ -558,6 +584,7 @@ function gralHTML(p,isMun){
     <div class="note">Selecciona un punto del mapa o un puesto de la lista para ver su detalle individual.</div>`;
   const delta=p.censo_2026-p.censo_2022;
   return `
+    <div class="det-mini" id="detMiniMap"><div class="cap">📍 ${esc(p.nombre)} · imagen satelital real</div></div>
     <div class="kpi-grid">
       <div class="kpi"><b>${fmt(p.censo_2026)}</b><span>Censo 2026</span></div>
       <div class="kpi ${delta>=0?'pos':'neg'}"><b>${delta>=0?'+':''}${fmt(delta)}</b><span>Δ vs 2022 (${f1(p.crecimiento_pct_22_26)}%)</span></div>
@@ -753,9 +780,13 @@ document.querySelectorAll('.det-tab').forEach(b=>b.addEventListener('click',()=>
   if(detailTab!=='graf') destroyCharts();
   const p=selected?PUESTOS.find(x=>x.puesto===selected):null;
   document.getElementById('detBody').innerHTML=contentFor(detailTab,p,selected===null);
+  if(detailTab==='gral' && p){ setTimeout(()=>renderMiniMap(p),100); }
+  else destroyMiniMap();
   if(detailTab==='graf') setTimeout(()=>buildGraficas(p,selected===null),60);
 }));
+document.getElementById('detBack').addEventListener('click',volverMapaInicial);
 document.getElementById('detClose').addEventListener('click',()=>{
+  destroyMiniMap();
   selected=null; applySelection(); renderListUI(document.getElementById('search').value);
   if(isMobile()){ document.getElementById('detail').classList.add('hidden'); }
   else { renderDetail(); }
