@@ -1,5 +1,5 @@
 /* Service Worker del Atlas Electoral de Acandí (PWA offline-first) */
-const CACHE='acandi-atlas-v3';
+const CACHE='acandi-atlas-v4';
 const CORE=[
   './',
   './index.html',
