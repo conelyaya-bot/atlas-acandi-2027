@@ -4,6 +4,12 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🗳️</text></svg>">
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#173a5c">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="mobile-web-app-capable" content="yes">
+<link rel="apple-touch-icon" href="assets/icon-192.png">
 <title>Atlas Electoral Interactivo de Acandí 2022–2027</title>
 <link rel="stylesheet" href="assets/leaflet/leaflet.css"/>
 <script src="assets/leaflet/leaflet.js"></script>
@@ -110,6 +116,27 @@
   .est.ok{background:#1e7d4f}.est.av{background:#2E75B6}.est.in{background:#F4B183;color:#5a3a00}.est.ri{background:#C00000}
   .mini-w{min-width:120px}
   .metaRowTtl{background:#f4f8fc;font-weight:700}
+  .simp-form{background:#f4f8fc;border:1px solid var(--borde);border-radius:10px;padding:10px;margin:8px 0}
+  .sf-row{display:flex;gap:7px;margin-bottom:7px}
+  .sf-row:last-child{margin-bottom:0}
+  .sf-in{flex:1;min-width:0;padding:8px 9px;border:1px solid var(--borde);border-radius:8px;font-size:12.5px;outline:none;background:#fff}
+  .sf-in:focus{border-color:var(--azul2)}
+  select.sf-in{flex:1}
+  .btn-reg{flex:none;background:#2E75B6;color:#fff;border:none;border-radius:8px;padding:8px 10px;font-size:11.5px;font-weight:600;cursor:pointer;white-space:nowrap}
+  .btn-reg:hover{background:#173a5c}
+  .btn-reg.sm{padding:6px 9px;font-size:13px}
+  .btn-del{flex:none;background:#fbe9e9;color:#C00000;border:1px solid #f3c1c1;border-radius:8px;padding:6px 9px;font-size:13px;cursor:pointer}
+  .btn-del:hover{background:#f3d2d2}
+  .simp-list{display:flex;flex-direction:column;gap:6px;margin-top:8px}
+  .simp-row{display:flex;align-items:center;gap:7px;padding:8px 10px;border:1px solid var(--borde);border-radius:9px;background:#fff}
+  .simp-row:hover{background:#f6f9fc}
+  .sr-nm{font-size:12.5px;font-weight:600;color:#22303f}
+  .sr-meta{font-size:10.5px;color:#7a8796;margin-top:1px}
+  .sf-h{font-size:11.5px;color:var(--azul);text-transform:uppercase;letter-spacing:.6px;margin:12px 0 4px;font-weight:700}
+  .simp-tools{display:flex;gap:7px;margin-top:8px}
+  .simp-tools .btn{margin-top:0;flex:1}
+  #searchSimp{width:100%;padding:8px 10px;border:1px solid var(--borde);border-radius:8px;font-size:12px;outline:none;margin-top:8px}
+  #searchSimp:focus{border-color:var(--azul2)}
   .chart-card{background:#fbfdff;border:1px solid var(--borde);border-radius:10px;padding:8px 10px;margin:8px 0}
   .chart-card h5{margin:0 0 4px;font-size:11.5px;color:var(--azul)}
   .chart-box{position:relative;height:210px}
@@ -312,7 +339,6 @@ const markerLayer = L.layerGroup().addTo(map);
 let activeCapa='potencial';
 let selected=null; // null = municipio
 const markersData={};
-const simps = loadSimp();
 
 function markerRadius(){ const z=map.getZoom(); return z>=18?6:(z>=15?9:13); }
 function gmapsLink(p){ return `https://www.google.com/maps/@${p.lat},${p.lon},18z`; }
@@ -461,14 +487,29 @@ function setCapa(k){
   showToast('🎨 Capa activa: '+CAPAS[k].name);
 }
 
-/* ================= SIMPATIZANTES (localStorage) ================= */
-const SIMP_KEY='acandi_simpatizantes_v1';
+/* ================= SIMPATIZANTES (registro individual offline-first) ================= */
+const PERSONAS_KEY='acandi_personas_v1';
+const METASIMP_KEY='acandi_metasimp_v1';
 const METAREF_KEY='acandi_metaref_v1';
-function loadSimp(){ try{ return JSON.parse(localStorage.getItem(SIMP_KEY))||{}; }catch(e){ return {}; } }
-function saveSimp(){ try{ localStorage.setItem(SIMP_KEY,JSON.stringify(simps)); }catch(e){} }
+const REG_URL='https://wsp.registraduria.gov.co/censo/consultar/';
+let personas=[];      // [{id,idDoc,nombre,apellido,cedula,celular,puesto,creado}]
+let metaSimp={};      // puesto -> meta de simpatizantes (configurable por puesto)
+let DB_MODE='local';  // 'local' o 'cloud'
+let FIRESTORE=null;
+let CLOUD_READY=false;
+let simpFilter=null;
+
+function loadJSON(k,d){ try{ const v=JSON.parse(localStorage.getItem(k)); return v==null?d:v; }catch(e){ return d; } }
+function saveJSON(k,v){ try{ localStorage.setItem(k,JSON.stringify(v)); }catch(e){} }
+function loadPersonas(){ return loadJSON(PERSONAS_KEY,[]); }
+function savePersonas(){ saveJSON(PERSONAS_KEY,personas); }
+function loadMetaSimp(){ return loadJSON(METASIMP_KEY,{}); }
+function saveMetaSimp(){ saveJSON(METASIMP_KEY,metaSimp); }
 function getMetaref(){ const v=parseInt(localStorage.getItem(METAREF_KEY)||'4200',10); return [3900,4200,4500].includes(v)?v:4200; }
 function setMetaref(v){ localStorage.setItem(METAREF_KEY,String(v)); }
-function simpOf(n){ return Math.max(0,parseInt(simps[n]||0,10)||0); }
+
+function simpOf(n){ return personas.filter(x=>x.puesto===n).length; }
+function metaSimpDe(n){ return Math.max(0,parseInt(metaSimp[n]||'0',10)||0); }
 function estadoDe(a){ if(a>=100)return['✔ Meta','ok']; if(a>=50)return['Avanzando','av']; if(a>=25)return['Iniciado','in']; return['En riesgo','ri']; }
 function barColorPct(a){ if(a>=100)return'#1e7d4f'; if(a>=50)return'#2E75B6'; if(a>=25)return'#F4B183'; return'#C00000'; }
 function TOT_meta(v){ return PUESTOS.reduce((a,p)=>a+(p['meta_'+v]||0),0); }
@@ -477,76 +518,224 @@ function barPctHTML(a){
           <div style="font-size:9px;color:#5a6a7c;margin-top:1px">${f1(a)}%</div>`;
 }
 
+/* ---- nube (Firestore offline-first) opcional: activa solo con FIREBASE_CONFIG ---- */
+function initCloudDB(){
+  if(!window.FIREBASE_CONFIG || !window.firebase) return;
+  try{
+    firebase.initializeApp(window.FIREBASE_CONFIG);
+    FIRESTORE=firebase.firestore();
+    FIRESTORE.enablePersistence({experimentalForceOwningTab:true}).catch(()=>{});
+    DB_MODE='cloud'; CLOUD_READY=true;
+    FIRESTORE.collection('simpatizantes').orderBy('creado','asc').onSnapshot(snap=>{
+      personas=snap.docs.map(d=>{ const x=d.data(); x.idDoc=d.id; if(!x.id) x.id=d.id; return x; });
+      savePersonas(); refreshSimpUI();
+    },()=>{});
+    FIRESTORE.collection('metasimp').doc('global').onSnapshot(snap=>{
+      metaSimp=(snap.exists&&snap.data().map)?snap.data().map:{};
+      saveMetaSimp(); refreshSimpUI();
+    },()=>{});
+  }catch(e){ DB_MODE='local'; CLOUD_READY=false; }
+}
+
+/* ---- registro ---- */
+function addPersona(nombre,apellido,cedula,celular,puesto){
+  const rec={id:'p'+Date.now()+Math.floor(Math.random()*999),nombre:nombre.trim(),apellido:apellido.trim(),
+    cedula:cedula.trim(),celular:celular.trim(),puesto:puesto||'',creado:Date.now()};
+  if(CLOUD_READY&&FIRESTORE){
+    FIRESTORE.collection('simpatizantes').add(rec).then(ref=>{
+      rec.idDoc=ref.id; rec.id=ref.id;
+      showToast('✅ Simpatizante registrado (se sincroniza en la nube)');
+    }).catch(()=>{ personas.push(rec); savePersonas(); refreshSimpUI(); showToast('✅ Guardado localmente (sin conexión)'); });
+  } else {
+    personas.push(rec); savePersonas(); refreshSimpUI(); showToast('✅ Simpatizante registrado');
+  }
+}
+function delPersona(id){
+  const rec=personas.find(x=>x.id===id||x.idDoc===id);
+  if(rec && CLOUD_READY && FIRESTORE && rec.idDoc && String(rec.idDoc).startsWith('p')===false){
+    FIRESTORE.collection('simpatizantes').doc(rec.idDoc).delete();
+  }
+  personas=personas.filter(x=>x.id!==id&&x.idDoc!==id);
+  savePersonas(); refreshSimpUI(); showToast('🗑 Simpatizante eliminado');
+}
+function setMetaSimp(puesto,v){
+  metaSimp[puesto]=Math.max(0,parseInt(v||'0',10)||0);
+  if(CLOUD_READY&&FIRESTORE){ FIRESTORE.collection('metasimp').doc('global').set({map:metaSimp},{merge:true}).catch(()=>{}); }
+  else saveMetaSimp();
+  refreshSimpUI();
+}
+
+/* ---- Registraduría: consulta del lugar de votación por cédula ---- */
+function consultarRegistraduria(cedula){
+  const c=String(cedula||'').trim();
+  if(!c){ showToast('⚠️ Digita el número de cédula primero'); return; }
+  try{ navigator.clipboard.writeText(c); }catch(e){}
+  window.open(REG_URL,'_blank','noopener');
+  showToast('🔎 Cédula '+c+' copiada: pégala en la consulta de la Registraduría');
+}
+
+/* ---- exportar / importar respaldo ---- */
+function exportSimpatizantes(){
+  const data={app:'Atlas Electoral Acandí',fecha:new Date().toISOString(),personas:personas,metaSimp:metaSimp};
+  const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});
+  const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='simpatizantes_acandi.json';
+  document.body.appendChild(a); a.click(); a.remove();
+  showToast('⬇️ Respaldo descargado ('+personas.length+' registros)');
+}
+function importSimpatizantes(file){
+  const r=new FileReader();
+  r.onload=()=>{
+    try{
+      const d=JSON.parse(r.result);
+      if(!Array.isArray(d.personas)) throw 0;
+      personas=d.personas.map(x=>({...x,idDoc:null}));
+      if(d.metaSimp&&typeof d.metaSimp==='object') metaSimp=d.metaSimp;
+      savePersonas(); saveMetaSimp(); refreshSimpUI();
+      showToast('✅ Importados '+personas.length+' simpatizantes');
+    }catch(e){ showToast('⚠️ Archivo inválido'); }
+  };
+  r.readAsText(file);
+}
+
+/* ---- formulario ---- */
+function simpFormHTML(puestoDef){
+  const opts=PUESTOS.map(p=>`<option value="${jsel(p.puesto)}" ${p.puesto===puestoDef?'selected':''}>${esc(p.short)}</option>`).join('');
+  return `
+  <div class="simp-form" id="simpForm">
+    <div class="sf-row">
+      <input id="sfNom" class="sf-in" placeholder="Nombre *" autocomplete="off">
+      <input id="sfApe" class="sf-in" placeholder="Apellido *" autocomplete="off">
+    </div>
+    <div class="sf-row">
+      <input id="sfCed" class="sf-in" placeholder="N° de cédula *" inputmode="numeric" autocomplete="off">
+      <button class="btn-reg" type="button" onclick="consultarRegistraduria(document.getElementById('sfCed').value)">🔎 Registraduría</button>
+    </div>
+    <div class="sf-row">
+      <input id="sfCel" class="sf-in" placeholder="N° de celular" inputmode="tel" autocomplete="off">
+      <select id="sfPue" class="sf-in">${opts}</select>
+    </div>
+    <button class="btn" onclick="guardarSimp()">➕ Guardar simpatizante</button>
+  </div>`;
+}
+function guardarSimp(){
+  const g=id=>{ const e=document.getElementById(id); return e?e.value.trim():''; };
+  const nom=g('sfNom'), ape=g('sfApe'), ced=g('sfCed').replace(/\D/g,''), cel=g('sfCel').replace(/\D/g,''), pue=g('sfPue');
+  if(!nom||!ape){ showToast('⚠️ Nombre y apellido son obligatorios'); return; }
+  if(ced.length<6||ced.length>11){ showToast('⚠️ Cédula inválida (debe tener 6 a 11 dígitos)'); return; }
+  if(personas.some(x=>x.cedula===ced)){ showToast('⚠️ Esa cédula ya está registrada'); return; }
+  addPersona(nom,ape,ced,cel,pue);
+}
+
+/* ---- lista ---- */
+function simpListHTML(filterPuesto){
+  const q=(document.getElementById('searchSimp')?document.getElementById('searchSimp').value:'').toLowerCase();
+  const list=personas
+    .filter(x=>!filterPuesto||x.puesto===filterPuesto)
+    .filter(x=>!q||(x.nombre+' '+x.apellido+' '+x.cedula+' '+(x.puesto||'')).toLowerCase().includes(q))
+    .sort((a,b)=>b.creado-a.creado);
+  if(!list.length) return '<div class="item-empty">Aún no hay simpatizantes registrados aquí.</div>';
+  return list.map(x=>{
+    const pu=PUESTOS.find(p=>p.puesto===x.puesto);
+    return `<div class="simp-row">
+      <div style="flex:1;min-width:0">
+        <div class="sr-nm">${esc(x.nombre)} ${esc(x.apellido)}</div>
+        <div class="sr-meta">CC <b>${esc(x.cedula)}</b> · 📱 ${esc(x.celular||'—')}</div>
+        <div class="sr-meta">🏫 ${pu?esc(pu.short):'<span style="color:#C00000">Sin puesto asignado</span>'}</div>
+      </div>
+      <button class="btn-reg sm" onclick="consultarRegistraduria('${x.cedula}')" title="Consultar su lugar de votación">🔎</button>
+      <button class="btn-del" onclick="delPersona('${x.id}')" title="Eliminar">🗑</button>
+    </div>`;
+  }).join('');
+}
+function simpSectionHTML(filterPuesto){
+  simpFilter=filterPuesto||null;
+  return `
+    <input id="searchSimp" placeholder="🔎 Buscar por nombre o cédula…" oninput="renderSimpList()">
+    <div class="simp-tools">
+      <button class="btn sec" onclick="exportSimpatizantes()">⬇️ Exportar</button>
+      <button class="btn sec" onclick="document.getElementById('fileSimp').click()">⬆️ Importar</button>
+      <input type="file" id="fileSimp" accept=".json,application/json" style="display:none" onchange="importSimpatizantes(this.files[0])">
+    </div>
+    <div class="simp-list" id="simpListWrap">${simpListHTML(simpFilter)}</div>`;
+}
+function renderSimpList(){
+  const lw=document.getElementById('simpListWrap');
+  if(lw) lw.innerHTML=simpListHTML(simpFilter);
+}
+
 function metaTableHTML(){
   const ref=getMetaref();
   const rows=PUESTOS.map((p,i)=>{
-    const meta=p['meta_'+ref], s=simpOf(p.puesto), pA=meta? s/meta*100:0;
+    const meta=p['meta_'+ref], s=simpOf(p.puesto), ms=metaSimpDe(p.puesto), pA=ms? s/ms*100:(s>0?100:0);
     const [et,cls]=estadoDe(pA);
     return `<tr id="mtRow${i}">
       <td style="cursor:pointer;font-weight:600;color:var(--azul)" onclick="selectPuesto('${jsel(p.puesto)}')">${esc(p.short)}</td>
       <td class="r">${fmt(p.meta_3900)}</td><td class="r">${fmt(p.meta_4200)}</td><td class="r">${fmt(p.meta_4500)}</td>
-      <td><input class="simp" type="number" min="0" value="${s}" data-i="${i}" onchange="onSimpChange(this)"></td>
+      <td class="r">${fmt(s)}</td>
+      <td><input class="simp" type="number" min="0" value="${ms}" data-p="${jsel(p.puesto)}" onchange="onMetaSimpChange(this)"></td>
       <td class="mini-w mtProg">${barPctHTML(pA)}</td>
       <td class="mtEst"><span class="est ${cls}">${et}</span></td>
     </tr>`;
   }).join('');
-  const totS=PUESTOS.reduce((a,p)=>a+simpOf(p.puesto),0), totM=TOT_meta(ref), totPA=totM? totS/totM*100:0;
+  const totS=PUESTOS.reduce((a,p)=>a+simpOf(p.puesto),0), totM=TOT_meta(ref),
+        totMS=PUESTOS.reduce((a,p)=>a+metaSimpDe(p.puesto),0), totPA=totMS? totS/totMS*100:(totS>0?100:0);
   const [et,cls]=estadoDe(totPA);
   return `
   <div style="display:flex;align-items:center;gap:8px;margin:6px 0">
-    <span style="font-size:12px;color:#3a4756">Comparar con meta:</span>
+    <span style="font-size:12px;color:#3a4756">Comparar con meta de votos:</span>
     <select id="metaRefSel" onchange="onMetaRef(this)" style="padding:5px;border:1px solid var(--borde);border-radius:6px">
       ${[3900,4200,4500].map(v=>`<option value="${v}" ${v===ref?'selected':''}>${fmt(v)} votos</option>`).join('')}
     </select>
   </div>
   <table class="metaT">
-    <thead><tr><th>Puesto</th><th>M3900</th><th>M4200</th><th>M4500</th><th>Simpatizantes</th><th>Avance</th><th>Estado</th></tr></thead>
+    <thead><tr><th>Puesto</th><th>M3900</th><th>M4200</th><th>M4500</th><th>Captados</th><th>Meta simp.</th><th>Avance</th><th>Estado</th></tr></thead>
     <tbody>${rows}</tbody>
     <tfoot><tr class="metaRowTtl" id="mtTot">
       <td>ACANDÍ (total)</td><td class="r">${fmt(TOT_meta(3900))}</td><td class="r">${fmt(TOT_meta(4200))}</td><td class="r">${fmt(TOT_meta(4500))}</td>
       <td class="r mtSimp">${fmt(totS)}</td>
+      <td class="r">${fmt(totMS)}</td>
       <td class="mini-w mtProg">${barPctHTML(totPA)}</td>
       <td class="mtEst"><span class="est ${cls}">${et}</span></td>
     </tr></tfoot>
   </table>
-  <button class="btn sec" onclick="resetSimp()">♻️ Reiniciar registro de simpatizantes</button>
-  <div class="note">Edita la columna <b>Simpatizantes</b>: registra los apoyos que se van sumando por puesto y compáralos con la meta elegida. Se guarda automáticamente en este navegador (localStorage).</div>`;
+  ${simpFormHTML(null)}
+  ${simpSectionHTML(null)}
+  <div class="note">La columna <b>Captados</b> cuenta las personas registradas con el formulario de simpatizantes (no se edita a mano). La columna <b>Meta simp.</b> es la meta de apoyo que defines para cada puesto. Todo se guarda en este dispositivo y, si configuras Firebase, se sincroniza automáticamente con la nube.</div>`;
 }
 
-function onSimpChange(input){
-  const i=parseInt(input.dataset.i,10);
-  simps[PUESTOS[i].puesto]=Math.max(0,parseInt(input.value||'0',10)||0);
-  saveSimp();
-  refreshMetaUI(); // actualiza en sitio, sin quitar el foco
-}
+function onMetaSimpChange(input){ setMetaSimp(input.dataset.p, input.value); }
 function onMetaRef(sel){ setMetaref(parseInt(sel.value,10)); renderDetail(); }
-function resetSimp(){ if(confirm('¿Borrar todos los simpatizantes registrados?')){ Object.keys(simps).forEach(k=>delete simps[k]); saveSimp(); renderDetail(); showToast('♻️ Registro reiniciado'); } }
+function resetSimp(){ if(confirm('¿Borrar TODOS los simpatizantes registrados?')){ personas=[]; metaSimp={}; savePersonas(); saveMetaSimp(); renderDetail(); showToast('♻️ Registro reiniciado'); } }
 
 function refreshMetaUI(){
   const body=document.getElementById('detBody');
+  if(!body) return;
   if(selected===null){
-    const ref=getMetaref();
     PUESTOS.forEach((p,i)=>{
-      const meta=p['meta_'+ref], s=simpOf(p.puesto), pA=meta? s/meta*100:0;
+      const s=simpOf(p.puesto), ms=metaSimpDe(p.puesto), pA=ms? s/ms*100:(s>0?100:0);
       const [et,cls]=estadoDe(pA);
       const prog=body.querySelector('#mtRow'+i+' .mtProg'); if(prog) prog.innerHTML=barPctHTML(pA);
       const est=body.querySelector('#mtRow'+i+' .mtEst'); if(est) est.innerHTML='<span class="est '+cls+'">'+et+'</span>';
     });
-    const totS=PUESTOS.reduce((a,p)=>a+simpOf(p.puesto),0), totM=TOT_meta(ref), totPA=totM? totS/totM*100:0;
+    const totS=PUESTOS.reduce((a,p)=>a+simpOf(p.puesto),0), totMS=PUESTOS.reduce((a,p)=>a+metaSimpDe(p.puesto),0), totPA=totMS? totS/totMS*100:(totS>0?100:0);
     const [et,cls]=estadoDe(totPA);
     const ts=body.querySelector('#mtTot .mtSimp'); if(ts) ts.innerHTML=fmt(totS);
     const tp=body.querySelector('#mtTot .mtProg'); if(tp) tp.innerHTML=barPctHTML(totPA);
     const te=body.querySelector('#mtTot .mtEst'); if(te) te.innerHTML='<span class="est '+cls+'">'+et+'</span>';
+    renderSimpList();
   } else {
     const p=PUESTOS.find(x=>x.puesto===selected); if(!p) return;
-    const ref=getMetaref(), meta=p['meta_'+ref], s=simpOf(p.puesto), pA=meta? s/meta*100:0;
+    const ref=getMetaref(), meta=p['meta_'+ref], s=simpOf(p.puesto), ms=metaSimpDe(p.puesto), pA=ms? s/ms*100:(s>0?100:0);
     const [et,cls]=estadoDe(pA);
     const set=(id,v)=>{ const e=document.getElementById(id); if(e) e.textContent=v; };
-    set('kpiSimp',fmt(s)); set('kpiAvance',f1(pA)+'%'); set('kpiFalta',fmt(Math.max(0,meta-s)));
+    set('kpiSimp',fmt(s)); set('kpiAvance',f1(pA)+'%'); set('kpiFalta',fmt(Math.max(0,ms-s)));
+    set('gralSimp',fmt(s));
     const bar=document.getElementById('barPuesto'); if(bar){ bar.style.width=Math.min(100,pA)+'%'; bar.style.background=barColorPct(pA); }
     const est=document.getElementById('estPuesto'); if(est){ est.textContent=et; est.className='est '+cls; }
+    renderSimpList();
   }
 }
+function refreshSimpUI(){ refreshMetaUI(); }
 
 /* ================= detalle (panel derecho tabulado) ================= */
 let detailTab='gral';
@@ -616,8 +805,11 @@ function gralHTML(p,isMun){
       • Bello ganó en 7 de 10 puestos; Martínez ganó el municipio por la Cabecera.<br>
       • Sapzurro empató 102–102 (sin ganador).<br>
       • Capitán creció <b>+163%</b> en el censo; San Miguel +43,6%; La Caleta −2,5%.<br>
-      • Usa la pestaña <b>Meta</b> para registrar simpatizantes por puesto.
+      • Usa la pestaña <b>Meta</b> para registrar simpatizantes por puesto: formulario individual, meta configurable y consulta del lugar de votación en la Registraduría por cédula.
     </div>
+    <h3 class="sec">Registro de simpatizantes (toda Acandí)</h3>
+    ${simpFormHTML(null)}
+    ${simpSectionHTML(null)}
     <div class="note">Selecciona un punto del mapa o un puesto de la lista para ver su detalle individual.</div>`;
   const delta=p.censo_2026-p.censo_2022;
   return `
@@ -628,8 +820,11 @@ function gralHTML(p,isMun){
       <div class="kpi"><b>${fmt(p.depositados_2023)}</b><span>Depositados 2023</span></div>
       <div class="kpi"><b>${pct(p.depositados_2023,p.censo_2026)}</b><span>Participación 2023</span></div>
       <div class="kpi"><b>${fmt(p.meta_4200)}</b><span>Meta 4200 (2027)</span></div>
-      <div class="kpi"><b>${fmt(simpOf(p.puesto))}</b><span>Simpatizantes captados</span></div>
+      <div class="kpi"><b id="gralSimp">${fmt(simpOf(p.puesto))}</b><span>Simpatizantes captados</span></div>
     </div>
+    <h3 class="sec">Simpatizantes de este puesto</h3>
+    ${simpFormHTML(p.puesto)}
+    ${simpSectionHTML(p.puesto)}
     <h3 class="sec">Resultado 2023</h3>
     ${p.ganador_2023.includes('EMPATE')
       ? `<div style="font-size:13px;padding:6px 0"><span class="tag emp">EMPATE</span> <b>Martínez ${fmt(p.martinez_2023)} – Bello ${fmt(p.bello_2023)}</b> (102–102 en Sapzurro)</div>`
@@ -719,33 +914,37 @@ function alcaldiaHTML(p,isMun){
 /* ---- Meta ---- */
 function metaHTML(p,isMun){
   if(isMun) return `<h3 class="sec">Tabla dinámica de metas por puesto</h3>${metaTableHTML()}`;
-  const ref=getMetaref(), meta=p['meta_'+ref], s=simpOf(p.puesto), pA=meta? s/meta*100:0;
-  const [et,cls]=estadoDe(pA), falt=Math.max(0,meta-s);
+  const ref=getMetaref(), meta=p['meta_'+ref], s=simpOf(p.puesto), ms=metaSimpDe(p.puesto), pA=ms? s/ms*100:(s>0?100:0);
+  const [et,cls]=estadoDe(pA), falt=Math.max(0,ms-s);
   return `
     <div style="display:flex;align-items:center;gap:8px;margin:6px 0">
-      <span style="font-size:12px;color:#3a4756">Comparar con meta:</span>
+      <span style="font-size:12px;color:#3a4756">Comparar con meta de votos:</span>
       <select onchange="onMetaRef(this)" style="padding:5px;border:1px solid var(--borde);border-radius:6px">
         ${[3900,4200,4500].map(v=>`<option value="${v}" ${v===ref?'selected':''}>${fmt(v)} votos</option>`).join('')}
       </select>
     </div>
     <div class="kpi-grid">
-      <div class="kpi"><b>${fmt(meta)}</b><span>Meta ${fmt(ref)} para ${esc(p.short)}</span></div>
+      <div class="kpi"><b>${fmt(meta)}</b><span>Meta votos ${fmt(ref)} · ${esc(p.short)}</span></div>
       <div class="kpi"><b id="kpiSimp">${fmt(s)}</b><span>Simpatizantes captados</span></div>
-      <div class="kpi ${pA>=100?'pos':'neg'}"><b id="kpiAvance">${f1(pA)}%</b><span>Avance vs meta ${fmt(ref)}</span></div>
-      <div class="kpi"><b id="kpiFalta">${fmt(falt)}</b><span>Faltan para la meta</span></div>
+      <div class="kpi ${pA>=100?'pos':'neg'}"><b id="kpiAvance">${f1(pA)}%</b><span>Avance vs meta simp. ${fmt(ms)}</span></div>
+      <div class="kpi"><b id="kpiFalta">${fmt(falt)}</b><span>Faltan para la meta simp.</span></div>
     </div>
     <div class="meta-bar" style="height:14px"><div id="barPuesto" style="width:${Math.min(100,pA)}%;background:${barColorPct(pA)}"></div></div>
     <div style="font-size:11px;color:#5a6a7c;margin:3px 0 6px">Avance: <b>${f1(pA)}%</b> · Estado: <span class="est ${cls}" id="estPuesto">${et}</span></div>
-    <label style="font-size:12px;color:#3a4756;display:block;margin-top:4px">Simpatizantes captados en ${esc(p.short)}:</label>
-    <input class="simp" type="number" min="0" value="${s}" data-i="${PUESTOS.findIndex(x=>x.puesto===p.puesto)}"
-      onchange="onSimpChange(this)" style="width:100%;margin-top:4px;text-align:center;font-size:16px;padding:9px">
+    <label style="font-size:12px;color:#3a4756;display:block;margin-top:4px">Meta de simpatizantes para ${esc(p.short)}:</label>
+    <input class="simp" type="number" min="0" value="${ms}" data-p="${jsel(p.puesto)}" onchange="onMetaSimpChange(this)" style="width:100%;margin-top:4px;text-align:center;font-size:16px;padding:9px">
+    <div class="sf-h">➕ Registrar simpatizante en este puesto</div>
+    ${simpFormHTML(p.puesto)}
+    <div class="sf-h">👥 Simpatizantes de ${esc(p.short)} (${fmt(s)})</div>
+    ${simpSectionHTML(p.puesto)}
     <table class="cuadro" style="margin-top:12px">
       <tr><td>Meta mínima (3900)</td><td class="r">${fmt(p.meta_3900)}</td></tr>
       <tr class="hl"><td>Meta objetivo (4200)</td><td class="r">${fmt(p.meta_4200)}</td></tr>
       <tr><td>Meta colchón (4500)</td><td class="r">${fmt(p.meta_4500)}</td></tr>
       <tr><td>Meta 4200 como % del censo 2026</td><td class="r">${f1(p.meta_4200_pct_censo26)}%</td></tr>
     </table>
-    <div class="note">Registra aquí los simpatizantes/compromisos que se van sumando en este puesto. Se guarda automáticamente en este navegador.</div>`;
+    <button class="btn sec" onclick="resetSimp()">♻️ Reiniciar registro de simpatizantes</button>
+    <div class="note">Cada persona registrada suma 1 a <b>Captados</b> en su puesto. Con 🔎 Registraduría consultas su lugar de votación oficial (pega la cédula copiada) y luego lo asignas en el formulario. Funciona sin internet: se guarda en el dispositivo y se sincroniza con la nube si configuras Firebase.</div>`;
 }
 
 /* ---- Gráficas (Chart.js) ---- */
