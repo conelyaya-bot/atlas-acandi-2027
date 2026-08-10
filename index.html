@@ -44,6 +44,7 @@
   .chip b{display:block;font-size:12.5px}
   .chip span{font-size:8.5px;text-transform:uppercase;opacity:.85;letter-spacing:.5px}
   .chip.hot{background:rgba(255,170,0,.22);border-color:#ffc85a}
+  .chip.grn{background:rgba(30,125,79,.25);border-color:#8fd0ad}
   #side{position:absolute;top:74px;left:12px;bottom:12px;width:330px;background:#fff;border-radius:12px;z-index:1000;
     box-shadow:0 4px 20px rgba(0,0,0,.25);display:flex;flex-direction:column;overflow:hidden}
   .side-head{padding:10px 12px 6px}
@@ -131,6 +132,27 @@
   .est.ok{background:#1e7d4f}.est.av{background:#2E75B6}.est.in{background:#F4B183;color:#5a3a00}.est.ri{background:#C00000}
   .mini-w{min-width:120px}
   .metaRowTtl{background:#f4f8fc;font-weight:700}
+  .seg-tot{background:linear-gradient(90deg,#173a5c,#2E75B6);color:#fff;border-radius:10px;padding:9px 11px;margin:6px 0 7px}
+  .seg-tot-hd{font-size:13px;font-weight:800;letter-spacing:.4px}
+  .seg-tot-hd span{font-size:9.5px;font-weight:600;opacity:.8;margin-left:5px}
+  .seg-tot-vals{font-size:11px;opacity:.95;margin:3px 0}
+  .seg-tot-vals b{color:#ffd54d}
+  .seg-tot .seg-bar{height:12px;background:rgba(255,255,255,.25)}
+  .seg-tot .seg-bar>div{background:#ffd54d!important}
+  .seg-tot-pct{font-size:11px;margin-top:5px}
+  .seg-tot .est{float:right}
+  .seg-row{display:flex;align-items:center;gap:7px;padding:6px 8px;border:1px solid var(--borde);border-radius:9px;background:#fff;cursor:pointer;margin-bottom:4px}
+  .seg-row:hover{background:#f0f5fc}
+  .seg-pos{width:20px;flex:none;text-align:center;font-weight:800;font-size:12px;color:var(--azul)}
+  .seg-main{flex:1;min-width:0}
+  .seg-nm{font-size:11.5px;font-weight:600;color:#22303f}
+  .seg-bar{height:7px;background:#eef2f7;border-radius:5px;overflow:hidden;margin-top:2px}
+  .seg-bar>div{height:100%;border-radius:5px}
+  .seg-bar.big{height:12px}
+  .seg-val{flex:none;font-size:10px;color:#5a6a7c;white-space:nowrap}
+  .seg-val b{color:var(--azul)}
+  .seg-pct{flex:none;width:42px;text-align:right;font-size:11px}
+  .seg-leg{font-size:9.5px;color:#8a96a3;margin-top:5px;line-height:1.4}
   .simp-form{background:#f4f8fc;border:1px solid var(--borde);border-radius:10px;padding:10px;margin:8px 0}
   .sf-row{display:flex;gap:7px;margin-bottom:7px}
   .sf-row:last-child{margin-bottom:0}
@@ -535,6 +557,63 @@ function barPctHTML(a){
           <div style="font-size:9px;color:#5a6a7c;margin-top:1px">${f1(a)}%</div>`;
 }
 
+/* ---- dashboard de seguimiento + export CSV ---- */
+function TOT_SIMP(){ return PUESTOS.reduce((a,p)=>a+simpOf(p.puesto),0); }
+function TOT_METSIMP(){ return PUESTOS.reduce((a,p)=>a+metaSimpDe(p.puesto),0); }
+function avanceDe(totS,totMS){ return totMS? totS/totMS*100:(totS>0?100:0); }
+function csvEsc(v){ const s=String(v==null?'':v); return /[",\n]/.test(s)?'"'+s.replace(/"/g,'""')+'"':s; }
+function downloadCSV(text,name){
+  const blob=new Blob(['\ufeff'+text],{type:'text/csv;charset=utf-8'});
+  const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=name;
+  document.body.appendChild(a); a.click(); a.remove();
+}
+function exportSimpatizantesCSV(){
+  const head='cedula,nombre,apellido,celular,puesto,fecha_registro';
+  const rows=personas.slice().sort((a,b)=>b.creado-a.creado)
+    .map(x=>[x.cedula||'',x.nombre||'',x.apellido||'',x.celular||'',x.puesto||'',new Date(x.creado||Date.now()).toLocaleDateString('es-CO')].map(csvEsc).join(','));
+  downloadCSV([head].concat(rows).join('\n'),'simpatizantes_acandi.csv');
+  showToast('⬇️ CSV del registro exportado ('+personas.length+' filas)');
+}
+function exportSeguimientoCSV(){
+  const head='puesto,captados,meta_simp,avance_pct,estado';
+  const rows=PUESTOS.map(p=>{
+    const s=simpOf(p.puesto), ms=metaSimpDe(p.puesto), pA=ms? s/ms*100:(s>0?100:0);
+    return [p.puesto,s,ms,f1(pA),estadoDe(pA)[0]].map(csvEsc).join(',');
+  });
+  const totS=TOT_SIMP(), totMS=TOT_METSIMP(), totPA=avanceDe(totS,totMS);
+  rows.push(['ACANDI (total)',totS,totMS,f1(totPA),estadoDe(totPA)[0]].map(csvEsc).join(','));
+  downloadCSV([head].concat(rows).join('\n'),'seguimiento_acandi.csv');
+  showToast('⬇️ CSV de seguimiento exportado ('+PUESTOS.length+' puestos)');
+}
+function seguimientoHTML(){
+  const totS=TOT_SIMP(), totMS=TOT_METSIMP(), totPA=avanceDe(totS,totMS);
+  const [tet,tcls]=estadoDe(totPA);
+  const rows=PUESTOS
+    .map((p,i)=>{ const s=simpOf(p.puesto), ms=metaSimpDe(p.puesto), pA=avanceDe(s,ms); const [et,cls]=estadoDe(pA); return {i,p,s,ms,pA,et,cls}; })
+    .sort((a,b)=>b.pA-a.pA || a.i-b.i)
+    .map((r,k)=>`
+      <div class="seg-row" onclick="selectPuesto('${jsel(r.p.puesto)}')">
+        <div class="seg-pos">${k===0?'🥇':k===1?'🥈':k===2?'🥉':k+1}</div>
+        <div class="seg-main">
+          <div class="seg-nm">${esc(r.p.short)}</div>
+          <div class="seg-bar"><div style="width:${Math.min(100,r.pA)}%;background:${barColorPct(r.pA)}"></div></div>
+        </div>
+        <div class="seg-val"><b>${fmt(r.s)}</b>/${fmt(r.ms)}</div>
+        <div class="seg-pct" style="color:${barColorPct(r.pA)}"><b>${f1(r.pA)}%</b></div>
+        <span class="est ${r.cls}">${r.et}</span>
+      </div>`)
+    .join('');
+  return `
+    <div class="seg-tot">
+      <div class="seg-tot-hd">ACANDÍ <span>total municipal</span></div>
+      <div class="seg-tot-vals"><b>${fmt(totS)}</b> simpatizantes captados · meta <b>${fmt(totMS)}</b></div>
+      <div class="seg-bar big"><div style="width:${Math.min(100,totPA)}%;background:${barColorPct(totPA)}"></div></div>
+      <div class="seg-tot-pct"><b>${f1(totPA)}%</b> de avance · <span class="est ${tcls}">${tet}</span></div>
+    </div>
+    ${rows}
+    <div class="seg-leg">Avance frente a la <b>Meta simp.</b> de cada puesto. Toca un puesto para abrir su ficha.</div>`;
+}
+
 /* ---- nube (Firestore offline-first) opcional: activa solo con FIREBASE_CONFIG ---- */
 function attachCloudListeners(){
   FIRESTORE.collection('simpatizantes').orderBy('creado','asc').onSnapshot(snap=>{
@@ -677,7 +756,8 @@ function simpSectionHTML(filterPuesto){
   return `
     <input id="searchSimp" placeholder="🔎 Buscar por nombre o cédula…" oninput="renderSimpList()">
     <div class="simp-tools">
-      <button class="btn sec" onclick="exportSimpatizantes()">⬇️ Exportar</button>
+      <button class="btn sec" onclick="exportSimpatizantesCSV()">⬇️ CSV</button>
+      <button class="btn sec" onclick="exportSimpatizantes()">⬇️ JSON</button>
       <button class="btn sec" onclick="document.getElementById('fileSimp').click()">⬆️ Importar</button>
       <input type="file" id="fileSimp" accept=".json,application/json" style="display:none" onchange="importSimpatizantes(this.files[0])">
     </div>
@@ -735,6 +815,7 @@ function resetSimp(){ if(confirm('¿Borrar TODOS los simpatizantes registrados?'
 function refreshMetaUI(){
   const body=document.getElementById('detBody');
   if(!body) return;
+  const cs=document.getElementById('chipSimp'); if(cs) cs.innerHTML='<b>'+fmt(TOT_SIMP())+'</b><span>Simp. registrados</span>';
   if(selected===null){
     PUESTOS.forEach((p,i)=>{
       const s=simpOf(p.puesto), ms=metaSimpDe(p.puesto), pA=ms? s/ms*100:(s>0?100:0);
@@ -742,11 +823,12 @@ function refreshMetaUI(){
       const prog=body.querySelector('#mtRow'+i+' .mtProg'); if(prog) prog.innerHTML=barPctHTML(pA);
       const est=body.querySelector('#mtRow'+i+' .mtEst'); if(est) est.innerHTML='<span class="est '+cls+'">'+et+'</span>';
     });
-    const totS=PUESTOS.reduce((a,p)=>a+simpOf(p.puesto),0), totMS=PUESTOS.reduce((a,p)=>a+metaSimpDe(p.puesto),0), totPA=totMS? totS/totMS*100:(totS>0?100:0);
+    const totS=TOT_SIMP(), totMS=TOT_METSIMP(), totPA=avanceDe(totS,totMS);
     const [et,cls]=estadoDe(totPA);
     const ts=body.querySelector('#mtTot .mtSimp'); if(ts) ts.innerHTML=fmt(totS);
     const tp=body.querySelector('#mtTot .mtProg'); if(tp) tp.innerHTML=barPctHTML(totPA);
     const te=body.querySelector('#mtTot .mtEst'); if(te) te.innerHTML='<span class="est '+cls+'">'+et+'</span>';
+    const seg=document.getElementById('segRank'); if(seg) seg.innerHTML=seguimientoHTML();
     renderSimpList();
   } else {
     const p=PUESTOS.find(x=>x.puesto===selected); if(!p) return;
@@ -832,6 +914,12 @@ function gralHTML(p,isMun){
       • Capitán creció <b>+163%</b> en el censo; San Miguel +43,6%; La Caleta −2,5%.<br>
       • Usa la pestaña <b>Meta</b> para registrar simpatizantes por puesto: formulario individual, meta configurable y consulta del lugar de votación en la Registraduría por cédula.
     </div>
+    <h3 class="sec">📊 Seguimiento de simpatizantes por puesto</h3>
+    <div class="simp-tools" style="margin-top:4px">
+      <button class="btn sec" onclick="exportSimpatizantesCSV()">⬇️ CSV registro</button>
+      <button class="btn sec" onclick="exportSeguimientoCSV()">⬇️ CSV seguimiento</button>
+    </div>
+    <div id="segRank">${seguimientoHTML()}</div>
     <h3 class="sec">Registro de simpatizantes (toda Acandí)</h3>
     ${simpFormHTML(null)}
     ${simpSectionHTML(null)}
@@ -981,7 +1069,8 @@ function buildGraficas(p,isMun){
     h += `<div class="chart-card"><h5>Censo electoral 2022 vs 2026 por puesto</h5><div class="chart-box"><canvas id="chCenso"></canvas></div></div>`;
     h += `<div class="chart-card"><h5>Crecimiento del censo 2022→2026 (%)</h5><div class="chart-box"><canvas id="chCre"></canvas></div></div>`;
     h += `<div class="chart-card"><h5>Votos Alcaldía 2023 (municipal)</h5><div class="chart-box"><canvas id="chAlc"></canvas></div></div>`;
-    h += `<div class="chart-card"><h5>Avance simpatizantes vs meta ${fmt(getMetaref())} (municipal)</h5><div class="chart-box"><canvas id="chMeta"></canvas></div></div>`;
+    h += `<div class="chart-card"><h5>Avance simpatizantes vs meta simp. (municipal)</h5><div class="chart-box"><canvas id="chMeta"></canvas></div></div>`;
+    h += `<div class="chart-card"><h5>Simpatizantes captados vs meta simp. por puesto</h5><div class="chart-box"><canvas id="chRank"></canvas></div></div>`;
     body.innerHTML=h;
     const labs=PUESTOS.map(x=>x.short), c22=PUESTOS.map(x=>x.censo_2022), c26=PUESTOS.map(x=>x.censo_2026), cre=PUESTOS.map(x=>x.crecimiento_pct_22_26);
     mk('chCenso',{type:'bar',data:{labels:labs,datasets:[
@@ -990,19 +1079,22 @@ function buildGraficas(p,isMun){
     mk('chCre',{type:'bar',data:{labels:labs,datasets:[{label:'% variación',data:cre,backgroundColor:cre.map(v=>v>=0?'#1e7d4f':'#C00000')}]},options:chartOpts(true)});
     mk('chAlc',{type:'doughnut',data:{labels:['Martínez','Bello','Arbeláez'],datasets:[{data:[TOT.mart,TOT.bello,TOT.arbel],backgroundColor:['#1F4E78','#C55A11','#7f8c99']}]},
       options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom'},tooltip:{callbacks:{label:c=>c.label+': '+c.parsed.toLocaleString('es-CO')}}}}});
-    const totS=PUESTOS.reduce((a,x)=>a+simpOf(x.puesto),0), totM=TOT_meta(getMetaref());
-    mk('chMeta',{type:'doughnut',data:{labels:['Simpatizantes captados','Faltan para la meta'],datasets:[{data:[totS,Math.max(0,totM-totS)],backgroundColor:['#1e7d4f','#e0e6ee']}]},
+    const totS=TOT_SIMP(), totMS=TOT_METSIMP();
+    mk('chMeta',{type:'doughnut',data:{labels:['Simpatizantes captados','Faltan para la meta'],datasets:[{data:[totS,Math.max(0,totMS-totS)],backgroundColor:['#1e7d4f','#e0e6ee']}]},
       options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom'}}}});
+    mk('chRank',{type:'bar',data:{labels:labs,datasets:[
+      {label:'Captados',data:PUESTOS.map(x=>simpOf(x.puesto)),backgroundColor:'#1e7d4f'},
+      {label:'Meta simp.',data:PUESTOS.map(x=>metaSimpDe(x.puesto)),backgroundColor:'#2E75B6'}]},options:chartOpts(true)});
   } else {
     h += `<div class="chart-card"><h5>Votos Alcaldía 2023 · ${esc(p.short)}</h5><div class="chart-box"><canvas id="chAlc"></canvas></div></div>`;
     h += `<div class="chart-card"><h5>Censo 2022 vs 2026</h5><div class="chart-box"><canvas id="chCenso"></canvas></div></div>`;
-    h += `<div class="chart-card"><h5>Avance simpatizantes vs meta ${fmt(getMetaref())}</h5><div class="chart-box"><canvas id="chMeta"></canvas></div></div>`;
+    h += `<div class="chart-card"><h5>Avance simpatizantes vs meta simp.</h5><div class="chart-box"><canvas id="chMeta"></canvas></div></div>`;
     body.innerHTML=h;
     mk('chAlc',{type:'doughnut',data:{labels:['Martínez','Bello','Arbeláez'],datasets:[{data:[p.martinez_2023,p.bello_2023,p.arbelaez_2023],backgroundColor:['#1F4E78','#C55A11','#7f8c99']}]},
       options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom'}}}});
     mk('chCenso',{type:'bar',data:{labels:['2022','2026'],datasets:[{label:'Censo',data:[p.censo_2022,p.censo_2026],backgroundColor:['#9aa7b5','#1F4E78']}]},options:chartOpts(true)});
-    const m=p['meta_'+getMetaref()], s=simpOf(p.puesto);
-    mk('chMeta',{type:'doughnut',data:{labels:['Captados','Faltan'],datasets:[{data:[s,Math.max(0,m-s)],backgroundColor:['#1e7d4f','#e0e6ee']}]},
+    const s=simpOf(p.puesto), ms=metaSimpDe(p.puesto);
+    mk('chMeta',{type:'doughnut',data:{labels:['Captados','Faltan'],datasets:[{data:[s,Math.max(0,ms-s)],backgroundColor:['#1e7d4f','#e0e6ee']}]},
       options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom'}}}});
   }
 }
@@ -1024,7 +1116,8 @@ function renderChips(){
     <div class="chip"><b>${fmt(TOT.censo_2026)}</b><span>Censo 2026</span></div>
     <div class="chip"><b>${fmt(TOT.dep)}</b><span>Depos. 2023</span></div>
     <div class="chip hot"><b>4.200</b><span>Meta 2027</span></div>
-    <div class="chip"><b>${pct(TOT.dep,TOT.censo_2026)}</b><span>Part. 2023</span></div>`;
+    <div class="chip"><b>${pct(TOT.dep,TOT.censo_2026)}</b><span>Part. 2023</span></div>
+    <div class="chip grn" id="chipSimp"><b>${fmt(TOT_SIMP())}</b><span>Simp. registrados</span></div>`;
 }
 
 /* ================= GUÍA DE USO (mini recorrido) ================= */
@@ -1129,6 +1222,7 @@ document.getElementById('fab').addEventListener('click',()=>{ toggleSide(); docu
 document.getElementById('search').addEventListener('focus',()=>{ if(isMobile()) openSide(); });
 
 buildMarkers();
+personas=loadPersonas(); metaSimp=loadMetaSimp();
 renderListUI('');
 renderCapasUI();
 renderChips();
