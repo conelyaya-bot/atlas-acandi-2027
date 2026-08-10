@@ -718,16 +718,51 @@ function simpFormHTML(puestoDef){
       <input id="sfCel" class="sf-in" placeholder="N° de celular" inputmode="tel" autocomplete="off">
       <select id="sfPue" class="sf-in">${opts}</select>
     </div>
-    <button class="btn" onclick="guardarSimp()">➕ Guardar simpatizante</button>
+    <button class="btn" id="simpSaveBtn" onclick="guardarSimp()">➕ Guardar simpatizante</button>
+    <button class="btn sec" id="simpCancelBtn" style="display:none" onclick="cancelarEdicion()">✖ Cancelar</button>
   </div>`;
+}
+let editSimpId=null;
+function clearSimpForm(){ ['sfNom','sfApe','sfCed','sfCel'].forEach(id=>{ const e=document.getElementById(id); if(e) e.value=''; }); }
+function cancelarEdicion(){
+  editSimpId=null;
+  const btn=document.getElementById('simpSaveBtn'); if(btn) btn.textContent='➕ Guardar simpatizante';
+  const cb=document.getElementById('simpCancelBtn'); if(cb) cb.style.display='none';
+  clearSimpForm();
+}
+function editarSimp(id){
+  const rec=personas.find(x=>(x.id||x.idDoc)===id); if(!rec) return;
+  editSimpId=rec.id||rec.idDoc;
+  const set=(eid,v)=>{ const e=document.getElementById(eid); if(e) e.value=v; };
+  set('sfNom',rec.nombre); set('sfApe',rec.apellido); set('sfCed',rec.cedula);
+  set('sfCel',rec.celular||''); set('sfPue',rec.puesto||'');
+  const btn=document.getElementById('simpSaveBtn'); if(btn) btn.textContent='💾 Guardar cambios';
+  const cb=document.getElementById('simpCancelBtn'); if(cb) cb.style.display='';
+  const f=document.getElementById('simpForm'); if(f) f.scrollIntoView({behavior:'smooth',block:'center'});
+  showToast('✏️ Editando a '+rec.nombre+' '+rec.apellido);
 }
 function guardarSimp(){
   const g=id=>{ const e=document.getElementById(id); return e?e.value.trim():''; };
   const nom=g('sfNom'), ape=g('sfApe'), ced=g('sfCed').replace(/\D/g,''), cel=g('sfCel').replace(/\D/g,''), pue=g('sfPue');
   if(!nom||!ape){ showToast('⚠️ Nombre y apellido son obligatorios'); return; }
   if(ced.length<6||ced.length>11){ showToast('⚠️ Cédula inválida (debe tener 6 a 11 dígitos)'); return; }
+  if(editSimpId){
+    const rec=personas.find(x=>(x.id||x.idDoc)===editSimpId);
+    if(!rec){ cancelarEdicion(); return; }
+    if(personas.some(x=>x.cedula===ced && (x.id||x.idDoc)!==editSimpId)){ showToast('⚠️ Esa cédula ya está registrada en otra persona'); return; }
+    rec.nombre=nom; rec.apellido=ape; rec.cedula=ced; rec.celular=cel; rec.puesto=pue;
+    savePersonas();
+    if(CLOUD_READY&&FIRESTORE&&rec.idDoc&&String(rec.idDoc).startsWith('p')===false){
+      FIRESTORE.collection('simpatizantes').doc(rec.idDoc).update({nombre:rec.nombre,apellido:rec.apellido,cedula:rec.cedula,celular:rec.celular,puesto:rec.puesto}).catch(()=>{});
+    }
+    refreshSimpUI();
+    cancelarEdicion();
+    showToast('💾 Cambios guardados');
+    return;
+  }
   if(personas.some(x=>x.cedula===ced)){ showToast('⚠️ Esa cédula ya está registrada'); return; }
   addPersona(nom,ape,ced,cel,pue);
+  clearSimpForm();
 }
 
 /* ---- lista ---- */
@@ -747,6 +782,7 @@ function simpListHTML(filterPuesto){
         <div class="sr-meta">🏫 ${pu?esc(pu.short):'<span style="color:#C00000">Sin puesto asignado</span>'}</div>
       </div>
       <button class="btn-reg sm" onclick="consultarRegistraduria('${x.cedula}')" title="Consultar su lugar de votación">🔎</button>
+      <button class="btn-reg sm" onclick="editarSimp('${x.id||x.idDoc}')" title="Corregir datos">✏️</button>
       <button class="btn-del" onclick="delPersona('${x.id}')" title="Eliminar">🗑</button>
     </div>`;
   }).join('');
