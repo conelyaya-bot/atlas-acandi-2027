@@ -644,18 +644,36 @@ function initCloudDB(){
 
 /* ---- sincronización REST entre dispositivos (servidor Python + túnel) ----
    Sin cuentas: todos los dispositivos comparten el mismo estado via
-   window.SYNC_URL (definido en sync-config.js). Última escritura gana. */
+   window.SYNC_URL (definido en sync-config.js). Los estados se FUSIONAN
+   (unión por cédula, meta = máximo) para que NUNCA se pierda lo que ya
+   existe en ningún dispositivo; luego el servidor queda como fuente común. */
 let SYNC_URL=(window.SYNC_URL||'').replace(/\/+$/,'');
 let syncTimer=null, syncFail=0, syncStatusEl=null;
 let lastLocalAt=0, lastRemoteAt=0;
 function syncMetaSave(){ saveJSON('sync_last_local_at', lastLocalAt); }
 function loadSyncMeta(){ lastLocalAt=parseInt(loadJSON('sync_last_local_at',0)||0,10); }
-function adoptRemoteState(st){
+function mergeRemoteState(st){
   if(!st||typeof st!=='object'||!Array.isArray(st.personas)) return false;
-  personas=st.personas||[];
-  metaSimp=st.metaSimp||{};
-  savePersonas(); saveMetaSimp(); refreshSimpUI();
-  return true;
+  const byId=new Map();
+  personas.forEach(p=>byId.set(p.id||p.idDoc||('cc:'+p.cedula),p));
+  st.personas.forEach(r=>{
+    const k=r.id||r.idDoc||('cc:'+r.cedula);
+    const ex=byId.get(k);
+    if(!ex||((ex.creado||0)<(r.creado||0))) byId.set(k,r);
+  });
+  const byCed=new Map();
+  byId.forEach(p=>{
+    const c=p.cedula||p.id||'';
+    const ex=byCed.get(c);
+    if(!ex||((ex.creado||0)<(p.creado||0))) byCed.set(c,p);
+  });
+  const merged=Array.from(byCed.values());
+  const changed=JSON.stringify(merged)!==JSON.stringify(personas);
+  personas=merged;
+  const rm=st.metaSimp||{};
+  Object.keys(rm).forEach(p=>{ if((metaSimp[p]||0)<(rm[p]||0)) metaSimp[p]=rm[p]; });
+  if(changed){ savePersonas(); saveMetaSimp(); refreshSimpUI(); }
+  return changed;
 }
 function syncStatusTxt(){
   const el=document.getElementById('syncStatus');
@@ -674,7 +692,11 @@ function syncPush(immediate){
       .then(st=>{
         if(st&&st.updatedAt){
           lastRemoteAt=st.updatedAt;
-          if(lastRemoteAt>lastLocalAt){ adoptRemoteState(st); lastLocalAt=lastRemoteAt; syncMetaSave(); }
+          if(lastRemoteAt>lastLocalAt){
+            const changed=mergeRemoteState(st);
+            lastLocalAt=lastRemoteAt; syncMetaSave();
+            if(changed) syncPush(true);
+          }
           syncFail=0; syncStatusTxt();
         }
       })
@@ -691,7 +713,7 @@ function pollSync(initial){
     .then(st=>{
       if(!st||typeof st!=='object'||!Array.isArray(st.personas)) return;
       const rt=st.updatedAt||0;
-      if(rt>lastLocalAt){ adoptRemoteState(st); lastLocalAt=rt; syncMetaSave(); }
+      if(rt>lastLocalAt){ const changed=mergeRemoteState(st); lastLocalAt=rt; syncMetaSave(); if(changed) syncPush(true); }
       else if(rt<lastLocalAt && !initial){ syncPush(true); }
       lastRemoteAt=rt; syncFail=0; syncStatusTxt();
       if(initial) syncPush(true);
