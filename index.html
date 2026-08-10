@@ -175,6 +175,13 @@
   .simp-tools .btn{margin-top:0;flex:1}
   #searchSimp{width:100%;padding:8px 10px;border:1px solid var(--borde);border-radius:8px;font-size:12px;outline:none;margin-top:8px}
   #searchSimp:focus{border-color:var(--azul2)}
+  .simp-summary{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:8px 0;padding:10px;background:#f4f7fb;border:1px solid var(--borde);border-radius:10px}
+  .simp-summary .kpi{flex:1;min-width:120px}
+  .simp-warn{font-size:12px;color:#C00000;margin-top:3px;min-height:15px}
+  .simp-modal{position:fixed;inset:0;background:rgba(8,16,28,.55);z-index:300;display:none;align-items:flex-start;justify-content:center;padding:22px 14px;overflow:auto}
+  .simp-modal-box{background:#fff;border-radius:14px;max-width:560px;width:100%;padding:16px;box-shadow:0 12px 44px rgba(0,0,0,.38)}
+  .simp-modal-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:10px;font-weight:700;color:var(--azul)}
+  .simp-modal-head .btn-del{border:none;background:#eef2f6;padding:6px 10px;border-radius:8px;cursor:pointer;font-weight:600}
   .chart-card{background:#fbfdff;border:1px solid var(--borde);border-radius:10px;padding:8px 10px;margin:8px 0}
   .chart-card h5{margin:0 0 4px;font-size:11.5px;color:var(--azul)}
   .chart-box{position:relative;height:210px}
@@ -284,6 +291,10 @@
 </div>
 <button id="fab" aria-label="Puestos de votación" title="Puestos de votación">📍</button>
 <div class="toast" id="toast"></div>
+<div class="simp-modal" id="simpModalWrap" aria-hidden="true">
+  <div class="simp-modal-box" id="simpModalBody"></div>
+  <input type="file" id="fileSimp" accept=".json,application/json" style="display:none" onchange="importSimpatizantes(this.files[0])">
+</div>
 <div id="guideMask" class="hidden">
   <div id="guideSpot"></div>
   <div id="guideCard">
@@ -803,9 +814,10 @@ function simpFormHTML(puestoDef){
       <input id="sfApe" class="sf-in" placeholder="Apellido *" autocomplete="off">
     </div>
     <div class="sf-row">
-      <input id="sfCed" class="sf-in" placeholder="N° de cédula *" inputmode="numeric" autocomplete="off">
+      <input id="sfCed" class="sf-in" placeholder="N° de cédula *" inputmode="numeric" autocomplete="off" oninput="onCedulaInput()">
       <button class="btn-reg" type="button" onclick="consultarRegistraduria(document.getElementById('sfCed').value)">🔎 Registraduría</button>
     </div>
+    <div class="simp-warn" id="sfCedWarn"></div>
     <div class="sf-row">
       <input id="sfCel" class="sf-in" placeholder="N° de celular" inputmode="tel" autocomplete="off">
       <select id="sfPue" class="sf-in">${opts}</select>
@@ -815,7 +827,7 @@ function simpFormHTML(puestoDef){
   </div>`;
 }
 let editSimpId=null;
-function clearSimpForm(){ ['sfNom','sfApe','sfCed','sfCel'].forEach(id=>{ const e=document.getElementById(id); if(e) e.value=''; }); }
+function clearSimpForm(){ ['sfNom','sfApe','sfCed','sfCel'].forEach(id=>{ const e=document.getElementById(id); if(e) e.value=''; }); const w=document.getElementById('sfCedWarn'); if(w) w.textContent=''; }
 function cancelarEdicion(){
   editSimpId=null;
   const btn=document.getElementById('simpSaveBtn'); if(btn) btn.textContent='➕ Guardar simpatizante';
@@ -841,7 +853,7 @@ function guardarSimp(){
   if(editSimpId){
     const rec=personas.find(x=>(x.id||x.idDoc)===editSimpId);
     if(!rec){ cancelarEdicion(); return; }
-    if(personas.some(x=>x.cedula===ced && (x.id||x.idDoc)!==editSimpId)){ showToast('⚠️ Esa cédula ya está registrada en otra persona'); return; }
+    if(personas.some(x=>x.cedula===ced && (x.id||x.idDoc)!==editSimpId)){ showToast('⚠️ Simpatizante existente (otra persona)'); return; }
     rec.nombre=nom; rec.apellido=ape; rec.cedula=ced; rec.celular=cel; rec.puesto=pue;
     savePersonas();
     syncPush();
@@ -853,17 +865,30 @@ function guardarSimp(){
     showToast('💾 Cambios guardados');
     return;
   }
-  if(personas.some(x=>x.cedula===ced)){ showToast('⚠️ Esa cédula ya está registrada'); return; }
+  if(personas.some(x=>x.cedula===ced)){ showToast('⚠️ Simpatizante existente'); return; }
   addPersona(nom,ape,ced,cel,pue);
   clearSimpForm();
 }
 
-/* ---- lista ---- */
-function simpListHTML(filterPuesto){
-  const q=(document.getElementById('searchSimp')?document.getElementById('searchSimp').value:'').toLowerCase();
+/* ---- lista confidencial (solo en la ventana modal) ---- */
+function cedulaExiste(ced){
+  const c=String(ced||'').replace(/\D/g,'');
+  return personas.some(x=>x.cedula===c && (!editSimpId||(x.id||x.idDoc)!==editSimpId));
+}
+function onCedulaInput(){
+  const w=document.getElementById('sfCedWarn'); if(!w) return;
+  const ced=(document.getElementById('sfCed')||{}).value||'';
+  w.textContent='';
+  if(ced.replace(/\D/g,'').length>=6 && cedulaExiste(ced)) w.textContent='⚠️ Simpatizante existente';
+}
+function simpModalMatch(x,q){
+  return !q||(x.nombre+' '+x.apellido+' '+x.cedula+' '+(x.puesto||'')).toLowerCase().includes(q);
+}
+function simpModalRows(){
+  const q=(document.getElementById('simpModalSearch')?document.getElementById('simpModalSearch').value:'').toLowerCase();
   const list=personas
-    .filter(x=>!filterPuesto||x.puesto===filterPuesto)
-    .filter(x=>!q||(x.nombre+' '+x.apellido+' '+x.cedula+' '+(x.puesto||'')).toLowerCase().includes(q))
+    .filter(x=>!simpFilter||x.puesto===simpFilter)
+    .filter(x=>simpModalMatch(x,q))
     .sort((a,b)=>b.creado-a.creado);
   if(!list.length) return '<div class="item-empty">Aún no hay simpatizantes registrados aquí.</div>';
   return list.map(x=>{
@@ -875,28 +900,63 @@ function simpListHTML(filterPuesto){
         <div class="sr-meta">🏫 ${pu?esc(pu.short):'<span style="color:#C00000">Sin puesto asignado</span>'}</div>
       </div>
       <button class="btn-reg sm" onclick="consultarRegistraduria('${x.cedula}')" title="Consultar su lugar de votación">🔎</button>
-      <button class="btn-reg sm" onclick="editarSimp('${x.id||x.idDoc}')" title="Corregir datos">✏️</button>
-      <button class="btn-del" onclick="delPersona('${x.id}')" title="Eliminar">🗑</button>
+      <button class="btn-reg sm" onclick="closeSimpModal();editarSimp('${x.id||x.idDoc}')" title="Corregir datos">✏️</button>
+      <button class="btn-del" onclick="delPersona('${x.id||x.idDoc}')" title="Eliminar">🗑</button>
     </div>`;
   }).join('');
 }
-function simpSectionHTML(filterPuesto){
-  simpFilter=filterPuesto||null;
+function simpModalBodyHTML(){
+  const q=(document.getElementById('simpModalSearch')?document.getElementById('simpModalSearch').value:'').toLowerCase();
+  const total=personas.filter(x=>!simpFilter||x.puesto===simpFilter).length;
+  const shown=personas.filter(x=>!simpFilter||x.puesto===simpFilter).filter(x=>simpModalMatch(x,q)).length;
   return `
-    <input id="searchSimp" placeholder="🔎 Buscar por nombre o cédula…" oninput="renderSimpList()">
+    <div class="simp-modal-head">
+      <span>🔒 Simpatizantes registrados (confidencial)</span>
+      <button class="btn-del" onclick="closeSimpModal()" title="Cerrar">✕</button>
+    </div>
+    <input id="simpModalSearch" placeholder="🔎 Buscar por nombre o cédula…" oninput="renderSimpModal()" style="width:100%;padding:8px 10px;border:1px solid var(--borde);border-radius:8px;font-size:13px;outline:none">
     <div class="simp-tools">
       <button class="btn sec" onclick="exportSimpatizantesCSV()">⬇️ CSV</button>
       <button class="btn sec" onclick="exportSimpatizantes()">⬇️ JSON</button>
       <button class="btn sec" onclick="document.getElementById('fileSimp').click()">⬆️ Importar</button>
-      <input type="file" id="fileSimp" accept=".json,application/json" style="display:none" onchange="importSimpatizantes(this.files[0])">
     </div>
-    <div id="syncStatus" style="font-size:12px;color:#3a4756;margin:6px 0;text-align:right"></div>
-    <div class="simp-list" id="simpListWrap">${simpListHTML(simpFilter)}</div>`;
+    <div class="simp-list" style="max-height:56vh;overflow:auto">${simpModalRows()}</div>
+    <div style="font-size:11px;color:#5a6a7c;margin-top:6px;text-align:right">${fmt(shown)} mostrados de ${fmt(total)}</div>`;
 }
-function renderSimpList(){
-  const lw=document.getElementById('simpListWrap');
-  if(lw) lw.innerHTML=simpListHTML(simpFilter);
+function openSimpModal(){
+  const w=document.getElementById('simpModalWrap'); if(!w) return;
+  w.style.display='flex';
+  const b=document.getElementById('simpModalBody'); if(b) b.innerHTML=simpModalBodyHTML();
+  const s=document.getElementById('simpModalSearch'); if(s) s.focus();
 }
+function closeSimpModal(){
+  const w=document.getElementById('simpModalWrap'); if(w) w.style.display='none';
+}
+function renderSimpModal(){
+  const w=document.getElementById('simpModalWrap');
+  if(!w||w.style.display!=='flex') return;
+  const prev=document.getElementById('simpModalSearch');
+  const q=prev?prev.value:'';
+  const b=document.getElementById('simpModalBody'); if(b) b.innerHTML=simpModalBodyHTML();
+  const s=document.getElementById('simpModalSearch');
+  if(s){ s.value=q; s.focus(); const l=q.length; try{s.setSelectionRange(l,l);}catch(e){} }
+}
+function simpSummaryHTML(filterPuesto){
+  simpFilter=filterPuesto||null;
+  const n=personas.filter(x=>!simpFilter||x.puesto===simpFilter).length;
+  return `
+    <div class="simp-summary">
+      <div class="kpi"><b class="cnt" id="simpSummaryCount">${fmt(n)}</b><span>Simpatizantes registrados</span></div>
+      <button class="btn" onclick="openSimpModal()">🔒 Ver simpatizantes</button>
+    </div>
+    <div id="syncStatus" style="font-size:12px;color:#3a4756;margin:6px 0;text-align:right"></div>`;
+}
+function refreshSimpViews(){
+  const c=document.getElementById('simpSummaryCount');
+  if(c) c.textContent=fmt(personas.filter(x=>!simpFilter||x.puesto===simpFilter).length);
+  renderSimpModal();
+}
+function renderSimpList(){ refreshSimpViews(); }
 
 function metaTableHTML(){
   const ref=getMetaref();
@@ -907,7 +967,7 @@ function metaTableHTML(){
       <td style="cursor:pointer;font-weight:600;color:var(--azul)" onclick="selectPuesto('${jsel(p.puesto)}')">${esc(p.short)}</td>
       <td class="r">${fmt(p.meta_3900)}</td><td class="r">${fmt(p.meta_4200)}</td><td class="r">${fmt(p.meta_4500)}</td>
       <td class="r">${fmt(s)}</td>
-      <td><input class="simp" type="number" min="0" value="${ms}" data-p="${jsel(p.puesto)}" onchange="onMetaSimpChange(this)"></td>
+      <td><input class="simp" type="number" min="0" value="${ms}" data-p="${jsel(p.puesto)}" oninput="onMetaSimpInput(this)" onchange="onMetaSimpChange(this)"></td>
       <td class="mini-w mtProg">${barPctHTML(pA)}</td>
       <td class="mtEst"><span class="est ${cls}">${et}</span></td>
     </tr>`;
@@ -928,17 +988,25 @@ function metaTableHTML(){
     <tfoot><tr class="metaRowTtl" id="mtTot">
       <td>ACANDÍ (total)</td><td class="r">${fmt(TOT_meta(3900))}</td><td class="r">${fmt(TOT_meta(4200))}</td><td class="r">${fmt(TOT_meta(4500))}</td>
       <td class="r mtSimp">${fmt(totS)}</td>
-      <td class="r">${fmt(totMS)}</td>
+      <td class="r mtMS">${fmt(totMS)}</td>
       <td class="mini-w mtProg">${barPctHTML(totPA)}</td>
       <td class="mtEst"><span class="est ${cls}">${et}</span></td>
     </tr></tfoot>
   </table>
   ${simpFormHTML(null)}
-  ${simpSectionHTML(null)}
-  <div class="note">La columna <b>Captados</b> cuenta las personas registradas con el formulario de simpatizantes (no se edita a mano). La columna <b>Meta simp.</b> es la meta de apoyo que defines para cada puesto. La lista se sincroniza automáticamente entre dispositivos: lo que cargues desde el celular aparece en la web y viceversa.</div>`;
+  ${simpSummaryHTML(null)}
+  <div class="note">La columna <b>Captados</b> cuenta las personas registradas con el formulario de simpatizantes (no se edita a mano). La columna <b>Meta simp.</b> es la meta de apoyo que defines para cada puesto. 🔒 Los datos de los simpatizantes son <b>confidenciales</b>: en el panel solo se muestra el número y sus detalles se abren en una ventana aparte con «Ver simpatizantes». La lista se sincroniza automáticamente entre dispositivos: lo que cargues desde el celular aparece en la web y viceversa.</div>`;
 }
 
-function onMetaSimpChange(input){ setMetaSimp(input.dataset.p, input.value); }
+let metaSaveTimer=null;
+function onMetaSimpInput(input){
+  const p=input.dataset.p, v=Math.max(0,parseInt(input.value||'0',10)||0);
+  metaSimp[p]=v;
+  refreshMetaUI();
+  if(metaSaveTimer) clearTimeout(metaSaveTimer);
+  metaSaveTimer=setTimeout(()=>setMetaSimp(p,input.value),1500);
+}
+function onMetaSimpChange(input){ setMetaSimp(input.dataset.p,input.value); showToast('✅ Meta guardada'); }
 function onMetaRef(sel){ setMetaref(parseInt(sel.value,10)); renderDetail(); }
 function resetSimp(){ if(confirm('¿Borrar TODOS los simpatizantes registrados?')){ personas=[]; metaSimp={}; savePersonas(); saveMetaSimp(); renderDetail(); showToast('♻️ Registro reiniciado'); syncPush(); } }
 
@@ -956,6 +1024,7 @@ function refreshMetaUI(){
     const totS=TOT_SIMP(), totMS=TOT_METSIMP(), totPA=avanceDe(totS,totMS);
     const [et,cls]=estadoDe(totPA);
     const ts=body.querySelector('#mtTot .mtSimp'); if(ts) ts.innerHTML=fmt(totS);
+    const tms=body.querySelector('#mtTot .mtMS'); if(tms) tms.innerHTML=fmt(totMS);
     const tp=body.querySelector('#mtTot .mtProg'); if(tp) tp.innerHTML=barPctHTML(totPA);
     const te=body.querySelector('#mtTot .mtEst'); if(te) te.innerHTML='<span class="est '+cls+'">'+et+'</span>';
     const seg=document.getElementById('segRank'); if(seg) seg.innerHTML=seguimientoHTML();
@@ -1052,7 +1121,7 @@ function gralHTML(p,isMun){
     <div id="segRank">${seguimientoHTML()}</div>
     <h3 class="sec">Registro de simpatizantes (toda Acandí)</h3>
     ${simpFormHTML(null)}
-    ${simpSectionHTML(null)}
+    ${simpSummaryHTML(null)}
     <div class="note">Selecciona un punto del mapa o un puesto de la lista para ver su detalle individual.</div>`;
   const delta=p.censo_2026-p.censo_2022;
   return `
@@ -1067,7 +1136,7 @@ function gralHTML(p,isMun){
     </div>
     <h3 class="sec">Simpatizantes de este puesto</h3>
     ${simpFormHTML(p.puesto)}
-    ${simpSectionHTML(p.puesto)}
+    ${simpSummaryHTML(p.puesto)}
     <h3 class="sec">Resultado 2023</h3>
     ${p.ganador_2023.includes('EMPATE')
       ? `<div style="font-size:13px;padding:6px 0"><span class="tag emp">EMPATE</span> <b>Martínez ${fmt(p.martinez_2023)} – Bello ${fmt(p.bello_2023)}</b> (102–102 en Sapzurro)</div>`
@@ -1175,11 +1244,11 @@ function metaHTML(p,isMun){
     <div class="meta-bar" style="height:14px"><div id="barPuesto" style="width:${Math.min(100,pA)}%;background:${barColorPct(pA)}"></div></div>
     <div style="font-size:11px;color:#5a6a7c;margin:3px 0 6px">Avance: <b>${f1(pA)}%</b> · Estado: <span class="est ${cls}" id="estPuesto">${et}</span></div>
     <label style="font-size:12px;color:#3a4756;display:block;margin-top:4px">Meta de simpatizantes para ${esc(p.short)}:</label>
-    <input class="simp" type="number" min="0" value="${ms}" data-p="${jsel(p.puesto)}" onchange="onMetaSimpChange(this)" style="width:100%;margin-top:4px;text-align:center;font-size:16px;padding:9px">
+    <input class="simp" type="number" min="0" value="${ms}" data-p="${jsel(p.puesto)}" oninput="onMetaSimpInput(this)" onchange="onMetaSimpChange(this)" style="width:100%;margin-top:4px;text-align:center;font-size:16px;padding:9px">
     <div class="sf-h">➕ Registrar simpatizante en este puesto</div>
     ${simpFormHTML(p.puesto)}
-    <div class="sf-h">👥 Simpatizantes de ${esc(p.short)} (${fmt(s)})</div>
-    ${simpSectionHTML(p.puesto)}
+    <div class="sf-h">👥 Simpatizantes de ${esc(p.short)} (${fmt(s)}) · 🔒 confidencial</div>
+    ${simpSummaryHTML(p.puesto)}
     <table class="cuadro" style="margin-top:12px">
       <tr><td>Meta mínima (3900)</td><td class="r">${fmt(p.meta_3900)}</td></tr>
       <tr class="hl"><td>Meta objetivo (4200)</td><td class="r">${fmt(p.meta_4200)}</td></tr>
