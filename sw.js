@@ -1,9 +1,10 @@
 /* Service Worker del Atlas Electoral de Acandí (PWA offline-first) */
-const CACHE='acandi-atlas-v1';
+const CACHE='acandi-atlas-v2';
 const CORE=[
   './',
   './index.html',
   './manifest.webmanifest',
+  './firebase-config.js',
   './assets/leaflet/leaflet.css',
   './assets/leaflet/leaflet.js',
   './assets/chart/chart.umd.min.js',
