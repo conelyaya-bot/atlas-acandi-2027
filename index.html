@@ -15,6 +15,7 @@
 <script src="assets/leaflet/leaflet.js"></script>
 <script src="assets/chart/chart.umd.min.js"></script>
 <script src="firebase-config.js"></script>
+<script src="sync-config.js"></script>
 <script>
 /* Carga el SDK de Firebase SOLO si hay firebase-config.js con claves (evita pesos y
    errores si no se usa nube). Al terminar dispara 'firebase-ready'. */
@@ -641,6 +642,71 @@ function initCloudDB(){
   }catch(e){ DB_MODE='local'; CLOUD_READY=false; DB_INITED=false; }
 }
 
+/* ---- sincronización REST entre dispositivos (servidor Python + túnel) ----
+   Sin cuentas: todos los dispositivos comparten el mismo estado via
+   window.SYNC_URL (definido en sync-config.js). Última escritura gana. */
+let SYNC_URL=(window.SYNC_URL||'').replace(/\/+$/,'');
+let syncTimer=null, syncFail=0, syncStatusEl=null;
+let lastLocalAt=0, lastRemoteAt=0;
+function syncMetaSave(){ saveJSON('sync_last_local_at', lastLocalAt); }
+function loadSyncMeta(){ lastLocalAt=parseInt(loadJSON('sync_last_local_at',0)||0,10); }
+function adoptRemoteState(st){
+  if(!st||typeof st!=='object'||!Array.isArray(st.personas)) return false;
+  personas=st.personas||[];
+  metaSimp=st.metaSimp||{};
+  savePersonas(); saveMetaSimp(); refreshSimpUI();
+  return true;
+}
+function syncStatusTxt(){
+  const el=document.getElementById('syncStatus');
+  if(!el) return;
+  if(!SYNC_URL){ el.textContent='💾 Modo local: cada dispositivo guarda su propia lista'; return; }
+  el.textContent = syncFail>=2
+    ? '☁️ Sincronización sin conexión (se reintenta cada 20 s…)'
+    : '☁️ Sincronizado: lo que cargues desde el celular o la web lo ven todos los dispositivos';
+}
+function syncPush(immediate){
+  if(!SYNC_URL) return;
+  const doPush=()=>{
+    lastLocalAt=Date.now(); syncMetaSave();
+    fetch(SYNC_URL+'/state',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({updatedAt:lastLocalAt,personas,metaSimp})})
+      .then(r=>r.json())
+      .then(st=>{
+        if(st&&st.updatedAt){
+          lastRemoteAt=st.updatedAt;
+          if(lastRemoteAt>lastLocalAt){ adoptRemoteState(st); lastLocalAt=lastRemoteAt; syncMetaSave(); }
+          syncFail=0; syncStatusTxt();
+        }
+      })
+      .catch(()=>{ syncFail++; syncStatusTxt(); });
+  };
+  if(immediate) return doPush();
+  if(syncTimer) clearTimeout(syncTimer);
+  syncTimer=setTimeout(doPush,1200);
+}
+function pollSync(initial){
+  if(!SYNC_URL) return;
+  fetch(SYNC_URL+'/state')
+    .then(r=>r.json())
+    .then(st=>{
+      if(!st||typeof st!=='object'||!Array.isArray(st.personas)) return;
+      const rt=st.updatedAt||0;
+      if(rt>lastLocalAt){ adoptRemoteState(st); lastLocalAt=rt; syncMetaSave(); }
+      else if(rt<lastLocalAt && !initial){ syncPush(true); }
+      lastRemoteAt=rt; syncFail=0; syncStatusTxt();
+      if(initial) syncPush(true);
+    })
+    .catch(()=>{ syncFail++; syncStatusTxt(); });
+}
+function initSync(){
+  if(!SYNC_URL) return;
+  loadSyncMeta();
+  pollSync(true);
+  if(syncTimer) clearInterval(syncTimer);
+  syncTimer=setInterval(()=>pollSync(false),12000);
+  document.addEventListener('visibilitychange',()=>{ if(document.visibilityState==='visible') pollSync(false); });
+}
+
 /* ---- registro ---- */
 function addPersona(nombre,apellido,cedula,celular,puesto){
   const rec={id:'p'+Date.now()+Math.floor(Math.random()*999),nombre:nombre.trim(),apellido:apellido.trim(),
@@ -653,6 +719,7 @@ function addPersona(nombre,apellido,cedula,celular,puesto){
   } else {
     personas.push(rec); savePersonas(); refreshSimpUI(); showToast('✅ Simpatizante registrado');
   }
+  syncPush();
 }
 function delPersona(id){
   const rec=personas.find(x=>x.id===id||x.idDoc===id);
@@ -661,12 +728,14 @@ function delPersona(id){
   }
   personas=personas.filter(x=>x.id!==id&&x.idDoc!==id);
   savePersonas(); refreshSimpUI(); showToast('🗑 Simpatizante eliminado');
+  syncPush();
 }
 function setMetaSimp(puesto,v){
   metaSimp[puesto]=Math.max(0,parseInt(v||'0',10)||0);
   if(CLOUD_READY&&FIRESTORE){ FIRESTORE.collection('metasimp').doc('global').set({map:metaSimp},{merge:true}).catch(()=>{}); }
   else saveMetaSimp();
   refreshSimpUI();
+  syncPush();
 }
 
 /* ---- Registraduría: consulta del lugar de votación por cédula ---- */
@@ -696,6 +765,7 @@ function importSimpatizantes(file){
       if(d.metaSimp&&typeof d.metaSimp==='object') metaSimp=d.metaSimp;
       savePersonas(); saveMetaSimp(); refreshSimpUI();
       showToast('✅ Importados '+personas.length+' simpatizantes');
+      syncPush();
     }catch(e){ showToast('⚠️ Archivo inválido'); }
   };
   r.readAsText(file);
@@ -752,6 +822,7 @@ function guardarSimp(){
     if(personas.some(x=>x.cedula===ced && (x.id||x.idDoc)!==editSimpId)){ showToast('⚠️ Esa cédula ya está registrada en otra persona'); return; }
     rec.nombre=nom; rec.apellido=ape; rec.cedula=ced; rec.celular=cel; rec.puesto=pue;
     savePersonas();
+    syncPush();
     if(CLOUD_READY&&FIRESTORE&&rec.idDoc&&String(rec.idDoc).startsWith('p')===false){
       FIRESTORE.collection('simpatizantes').doc(rec.idDoc).update({nombre:rec.nombre,apellido:rec.apellido,cedula:rec.cedula,celular:rec.celular,puesto:rec.puesto}).catch(()=>{});
     }
@@ -797,6 +868,7 @@ function simpSectionHTML(filterPuesto){
       <button class="btn sec" onclick="document.getElementById('fileSimp').click()">⬆️ Importar</button>
       <input type="file" id="fileSimp" accept=".json,application/json" style="display:none" onchange="importSimpatizantes(this.files[0])">
     </div>
+    <div id="syncStatus" style="font-size:12px;color:#3a4756;margin:6px 0;text-align:right"></div>
     <div class="simp-list" id="simpListWrap">${simpListHTML(simpFilter)}</div>`;
 }
 function renderSimpList(){
@@ -841,12 +913,12 @@ function metaTableHTML(){
   </table>
   ${simpFormHTML(null)}
   ${simpSectionHTML(null)}
-  <div class="note">La columna <b>Captados</b> cuenta las personas registradas con el formulario de simpatizantes (no se edita a mano). La columna <b>Meta simp.</b> es la meta de apoyo que defines para cada puesto. Todo se guarda en este dispositivo y, si configuras Firebase, se sincroniza automáticamente con la nube.</div>`;
+  <div class="note">La columna <b>Captados</b> cuenta las personas registradas con el formulario de simpatizantes (no se edita a mano). La columna <b>Meta simp.</b> es la meta de apoyo que defines para cada puesto. La lista se sincroniza automáticamente entre dispositivos: lo que cargues desde el celular aparece en la web y viceversa.</div>`;
 }
 
 function onMetaSimpChange(input){ setMetaSimp(input.dataset.p, input.value); }
 function onMetaRef(sel){ setMetaref(parseInt(sel.value,10)); renderDetail(); }
-function resetSimp(){ if(confirm('¿Borrar TODOS los simpatizantes registrados?')){ personas=[]; metaSimp={}; savePersonas(); saveMetaSimp(); renderDetail(); showToast('♻️ Registro reiniciado'); } }
+function resetSimp(){ if(confirm('¿Borrar TODOS los simpatizantes registrados?')){ personas=[]; metaSimp={}; savePersonas(); saveMetaSimp(); renderDetail(); showToast('♻️ Registro reiniciado'); syncPush(); } }
 
 function refreshMetaUI(){
   const body=document.getElementById('detBody');
@@ -1259,6 +1331,7 @@ document.getElementById('search').addEventListener('focus',()=>{ if(isMobile()) 
 
 buildMarkers();
 personas=loadPersonas(); metaSimp=loadMetaSimp();
+initSync();
 renderListUI('');
 renderCapasUI();
 renderChips();
