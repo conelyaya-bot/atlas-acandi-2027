@@ -1109,6 +1109,8 @@ renderCapasUI();
 renderChips();
 renderDetail();
 if(isMobile()){ document.getElementById('detail').classList.add('hidden'); }
+
+if('serviceWorker' in navigator){ navigator.serviceWorker.register('sw.js').catch(()=>{}); }
 </script>
 </body>
 </html>
