@@ -1,10 +1,9 @@
 /* Service Worker del Atlas Electoral de Acandí (PWA offline-first) */
-const CACHE='acandi-atlas-v4';
+const CACHE='acandi-atlas-v5';
 const CORE=[
   './',
   './index.html',
   './manifest.webmanifest',
-  './firebase-config.js',
   './sync-config.js',
   './assets/leaflet/leaflet.css',
   './assets/leaflet/leaflet.js',
@@ -49,8 +48,7 @@ self.addEventListener('fetch',e=>{
   // App shell: red primero, cache como respaldo offline
   e.respondWith(
     fetch(req).then(res=>{
-      const cl=res.clone();
-      caches.open(CACHE).then(c=>c.put(req,cl));
+      if(res.ok){ const cl=res.clone(); caches.open(CACHE).then(c=>c.put(req,cl)); }
       return res;
     }).catch(()=>caches.match(req).then(c=>c || caches.match('./index.html')))
   );
