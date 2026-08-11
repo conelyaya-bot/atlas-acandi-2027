@@ -1,0 +1,21 @@
+#!/bin/sh
+# pre-commit hook del Atlas Electoral de Acandí
+# 1) Nunca versionar firebase-config.js (contiene claves reales).
+# 2) Si cambia sw.js, exigir bumpear CACHE (evita que el celular quede con caché vieja).
+
+fail(){ echo "pre-commit: $1" >&2; exit 1; }
+
+if git diff --cached --name-only | grep -qx 'firebase-config.js'; then
+  fail "firebase-config.js está gitignored por contener claves reales. Usa firebase-config.sample.js."
+fi
+
+if git diff --cached --name-only | grep -qx 'sw.js'; then
+  new_v=$(sed -n "s/^const CACHE='acandi-atlas-v\([0-9]*\)';/\1/p" sw.js | head -1)
+  old_v=$(git show HEAD:sw.js 2>/dev/null | sed -n "s/^const CACHE='acandi-atlas-v\([0-9]*\)';/\1/p" | head -1)
+  [ -n "$new_v" ] || fail "sw.js debe declarar CACHE='acandi-atlas-vN'"
+  if [ -n "$old_v" ] && [ "$new_v" -le "$old_v" ]; then
+    fail "sw.js: bumpea la versión de CACHE (HEAD=$old_v -> $new_v) para que el celular descargue la nueva versión."
+  fi
+fi
+
+exit 0
