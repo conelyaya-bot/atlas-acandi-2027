@@ -1417,6 +1417,10 @@ document.getElementById('detClose').addEventListener('click',()=>{
 });
 document.getElementById('menuBtn').addEventListener('click',toggleSide);
 document.getElementById('homeBtn').addEventListener('click',volverMapaInicial);
+document.addEventListener('click',e=>{
+  const s=e.target.closest('.simp-summary');
+  if(s && !e.target.closest('button')) openSimpModal();
+});
 document.getElementById('fab').addEventListener('click',()=>{ toggleSide(); document.getElementById('detail').classList.add('hidden'); });
 document.getElementById('search').addEventListener('focus',()=>{ if(isMobile()) openSide(); });
 
